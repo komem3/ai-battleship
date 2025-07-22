@@ -7,10 +7,10 @@ multiplayer battleship game built with React, Vite, and WebRTC for P2P communica
 - **Multiplayer Support**: 2-5 players in free-for-all mode
 - **P2P Architecture**: WebRTC for real-time game synchronization
 - **Dynamic Board Sizing**: Board size changes based on player count
-  - 2 players: 10x10
-  - 3 players: 12x12  
-  - 4 players: 15x15
-  - 5 players: 20x20
+  - 2 players: 5x5
+  - 3 players: 7x7
+  - 4 players: 10x10
+  - 5 players: 12x12
 - **Automatic Ship Placement**: Ships are automatically placed at game start
 - **Real-time Combat**: Turn-based attacks with live updates
 - **Action History**: Complete game log with timestamps
@@ -19,16 +19,19 @@ multiplayer battleship game built with React, Vite, and WebRTC for P2P communica
 ## Setup
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Start the WebSocket signaling server:
+
 ```bash
 npm run server
 ```
 
 3. Start the development server:
+
 ```bash
 npm run dev
 ```
@@ -62,6 +65,7 @@ npm run dev
 ## Development
 
 The project uses:
+
 - React 19 with hooks
 - Vite for build tooling
 - Tailwind CSS for styling
