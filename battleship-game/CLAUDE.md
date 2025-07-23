@@ -7,18 +7,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a multiplayer battleship game application with the following key features:
 - Multiplayer support (2-5 players) in free-for-all mode
 - Shared board where all players place ships (only own ships visible to each player)
-- WebSocket-based real-time multiplayer synchronization
-- WebRTC infrastructure present for future P2P implementation
-- Dynamic board sizing based on player count (2p: 10x10, 3p: 12x12, 4p: 15x15, 5p: 20x20)
+- **WebRTC P2P communication** for real-time game synchronization with WebSocket signaling
+- Dynamic board sizing based on player count (2p: 5x5, 3p: 7x7, 4p: 10x10, 5p: 12x12)
 - Turn-based combat with single coordinate attacks per turn
 - Action history tracking for all game events
 - Automatic ship placement at game start
 - Real-time game statistics and player status
+- P2P connection status visualization in lobby
 
 ## Technology Stack
 
 - **Frontend**: React 19.1.0 + Vite 7.0.0 + Tailwind CSS 4.1.11
-- **Communication**: WebSocket (ws 8.18.3) for real-time multiplayer, Simple-peer 9.11.1 for WebRTC infrastructure
+- **Communication**: WebRTC P2P (game data) + WebSocket (ws 8.18.3) (signaling only)
 - **Language**: JavaScript (JSX for React components)
 - **Build Tool**: Vite with React plugin
 - **Styling**: Tailwind CSS with Vite integration
@@ -59,44 +59,47 @@ The project is organized as follows:
         │   └── Lobby.jsx          # Room creation/joining interface
         ├── hooks/          # Custom React hooks
         │   ├── useGameState.js    # Game state management
-        │   └── useWebRTC.js       # WebSocket/WebRTC connectivity
+        │   ├── useWebSocket.js    # WebSocket connectivity (legacy)
+        │   └── useWebRTC.js       # WebRTC P2P communication
         └── utils/          # Utility functions
             └── shipPlacement.js   # Ship placement algorithms
 ```
 
 ### Key Architecture Decisions
-- **Communication**: Currently using WebSocket for all real-time game synchronization
-- **WebRTC**: Infrastructure present but not actively used (ready for future P2P implementation)
-- **State Management**: Custom React hooks for game state and connectivity
-- **Real-time Sync**: All game actions synchronized through WebSocket server
+- **Communication**: WebRTC P2P for game data + WebSocket for signaling only
+- **State Management**: Custom React hooks for game state and P2P connectivity
+- **Real-time Sync**: All game actions synchronized through WebRTC DataChannels
+- **P2P Architecture**: Host-based mesh network for multiplayer synchronization
 - **Shared Board**: Multiple players can place ships on same board, overlapping ships all take damage when attacked
 - **Styling**: Tailwind CSS with Vite integration for modern CSS workflow
 - **Dependencies**: Minimal dependency footprint focusing on core functionality
 
 ### Current Implementation Status
 - ✅ Complete lobby system with room creation/joining
-- ✅ Real-time multiplayer game synchronization via WebSocket
-- ✅ Dynamic board sizing based on player count
+- ✅ **WebRTC P2P communication** for real-time multiplayer game synchronization
+- ✅ **WebSocket signaling server** for WebRTC connection establishment
+- ✅ **P2P connection status visualization** in lobby interface
+- ✅ Dynamic board sizing based on player count (corrected: 2p:5x5, 3p:7x7, 4p:10x10, 5p:12x12)
 - ✅ Automatic ship placement system
-- ✅ Turn-based combat system
+- ✅ Turn-based combat system with P2P synchronization
 - ✅ Action history tracking with timestamps
 - ✅ Game statistics display
-- ✅ WebSocket server for multiplayer signaling
 - ✅ Responsive UI with Tailwind CSS
 - ✅ Modern React 19 with hooks-based architecture
 
 ### Testing Strategy
 - No test framework currently implemented
-- Focus areas should be: game logic, multiplayer synchronization, UI components, and ship placement algorithms
+- Focus areas should be: game logic, WebRTC P2P synchronization, UI components, and ship placement algorithms
 - Recommended: Add Jest + React Testing Library for comprehensive testing
-- Consider testing WebSocket connections and game state synchronization
+- Consider testing WebRTC connections, P2P game state synchronization, and signaling server functionality
 
 ### Development Process
 - Modern JavaScript (ES modules) with JSX for React components
 - Tailwind CSS 4.x with Vite integration for styling
 - ESLint configured with React-specific rules and hooks validation
 - Hot module replacement via Vite for fast development
-- Node.js WebSocket server for multiplayer functionality
+- Node.js WebSocket server for WebRTC signaling (not game data)
+- WebRTC P2P for low-latency game communication
 
 ## Game Rules Summary
 
@@ -115,7 +118,7 @@ All commands should be run from the `battleship-game/` directory:
 
 ### Development
 - **Dev server**: `npm run dev` - Starts the Vite development server (default: http://localhost:5173)
-- **WebSocket server**: `npm run server` - Starts the WebSocket server on port 8080 (required for multiplayer)
+- **Signaling server**: `npm run server` - Starts the WebSocket signaling server on port 8080 (required for WebRTC P2P connection establishment)
 
 ### Production
 - **Build**: `npm run build` - Builds the application for production
@@ -126,25 +129,29 @@ All commands should be run from the `battleship-game/` directory:
 
 ### Testing
 - **Test**: No test framework currently configured
-- **Recommended**: Add Jest + React Testing Library + WebSocket testing utilities
+- **Recommended**: Add Jest + React Testing Library + WebRTC/WebSocket testing utilities
 
 ### Development Workflow
 1. Navigate to `battleship-game/` directory
 2. Install dependencies: `npm install` (if first time)
-3. Start WebSocket server: `npm run server` (keep running in one terminal)
+3. Start signaling server: `npm run server` (keep running in one terminal)
 4. Start development server: `npm run dev` (in another terminal)
 5. Open browser to displayed URL (typically http://localhost:5173)
-6. Create or join rooms to test multiplayer functionality
-7. Run linting before commits: `npm run lint`
+6. Create or join rooms to test WebRTC P2P multiplayer functionality
+7. Monitor WebRTC connection status in lobby interface
+8. Run linting before commits: `npm run lint`
 
 ### Environment Setup
-- Node.js required for WebSocket server and build tools
+- Node.js required for signaling server and build tools
 - No additional environment variables needed
 - .env files are gitignored at root level for future configuration needs
+- Modern browser with WebRTC support required
 
 ## Important Notes
-- The WebSocket server must be running for multiplayer functionality
-- Game state is synchronized in real-time across all connected players
+- The WebSocket signaling server must be running for WebRTC connection establishment
+- Game state is synchronized in real-time via WebRTC P2P connections
 - Ship placement is automatic - no manual placement interface currently
-- All game logic happens client-side with WebSocket synchronization
+- All game logic happens client-side with WebRTC P2P synchronization
+- WebSocket is used only for signaling, not for game data transmission
 - The application uses modern React patterns (hooks, functional components)
+- WebRTC provides low-latency, direct peer-to-peer communication

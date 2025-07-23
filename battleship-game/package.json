@@ -4,17 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "node server.js",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "server": "node server.js"
+    "gcp-build": "",
+    "deploy:frontend": "pnpm build && firebase deploy",
+    "deploy:ws": "gcloud run deploy room --source . --project battleship-1b4f8 --max-instances=1 --region=asia-northeast1 --allow-unauthenticated"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.11",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "simple-peer": "^9.11.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {

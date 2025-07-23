@@ -108,80 +108,64 @@ wss.on('connection', (ws) => {
           }, ws);
           break;
           
+          
         case 'webrtc_offer':
+          const offerClientInfo = clients.get(ws);
+          if (offerClientInfo) {
+            console.log('Relaying WebRTC offer to peer:', message.targetPeer);
+            const targetRoom = rooms.get(offerClientInfo.roomCode);
+            if (targetRoom) {
+              targetRoom.clients.forEach(client => {
+                const clientInfo = clients.get(client);
+                if (clientInfo && clientInfo.playerId === message.targetPeer) {
+                  client.send(JSON.stringify({
+                    type: 'webrtc_offer',
+                    offer: message.offer,
+                    fromPeer: offerClientInfo.playerId
+                  }));
+                }
+              });
+            }
+          }
+          break;
+
         case 'webrtc_answer':
+          const answerClientInfo = clients.get(ws);
+          if (answerClientInfo) {
+            console.log('Relaying WebRTC answer to peer:', message.targetPeer);
+            const targetRoom = rooms.get(answerClientInfo.roomCode);
+            if (targetRoom) {
+              targetRoom.clients.forEach(client => {
+                const clientInfo = clients.get(client);
+                if (clientInfo && clientInfo.playerId === message.targetPeer) {
+                  client.send(JSON.stringify({
+                    type: 'webrtc_answer',
+                    answer: message.answer,
+                    fromPeer: answerClientInfo.playerId
+                  }));
+                }
+              });
+            }
+          }
+          break;
+
         case 'webrtc_ice_candidate':
-          const clientInfo = clients.get(ws);
-          if (clientInfo) {
-            broadcastToRoom(clientInfo.roomCode, {
-              type: message.type,
-              from: clientInfo.playerId,
-              to: message.to,
-              data: message.data
-            }, ws);
-          }
-          break;
-          
-        case 'game_started':
-          const gameClientInfo = clients.get(ws);
-          if (gameClientInfo) {
-            console.log('Broadcasting game_started to room:', gameClientInfo.roomCode);
-            broadcastToRoom(gameClientInfo.roomCode, {
-              type: 'game_started',
-              board: message.board,
-              ships: message.ships,
-              currentPlayer: message.currentPlayer,
-              maxTurns: message.maxTurns
-            }, ws);
-          }
-          break;
-          
-        case 'attack_sync':
-          const attackClientInfo = clients.get(ws);
-          if (attackClientInfo) {
-            console.log('Broadcasting attack_sync to room:', attackClientInfo.roomCode);
-            broadcastToRoom(attackClientInfo.roomCode, {
-              type: 'attack_sync',
-              coordinates: message.coordinates,
-              attacker: message.attacker,
-              attackingShipId: message.attackingShipId,
-              turn: message.turn
-            }, ws);
-          }
-          break;
-          
-        case 'move_sync':
-          const moveClientInfo = clients.get(ws);
-          if (moveClientInfo) {
-            console.log('Broadcasting move_sync to room:', moveClientInfo.roomCode);
-            broadcastToRoom(moveClientInfo.roomCode, {
-              type: 'move_sync',
-              shipId: message.shipId,
-              coordinates: message.coordinates,
-              player: message.player,
-              turn: message.turn
-            }, ws);
-          }
-          break;
-          
-        case 'turn_sync':
-          const turnClientInfo = clients.get(ws);
-          if (turnClientInfo) {
-            console.log('Broadcasting turn_sync to room:', turnClientInfo.roomCode);
-            console.log('Received turn_sync message:', message);
-            console.log('Message currentPlayer:', message.currentPlayer);
-            console.log('Message turnCount:', message.turnCount);
-            console.log('Message fromPlayer:', message.fromPlayer);
-            
-            const broadcastMessage = {
-              type: 'turn_sync',
-              currentPlayer: message.currentPlayer,
-              turnCount: message.turnCount,
-              fromPlayer: message.fromPlayer
-            };
-            console.log('Broadcasting message:', broadcastMessage);
-            
-            broadcastToRoom(turnClientInfo.roomCode, broadcastMessage, ws);
+          const iceClientInfo = clients.get(ws);
+          if (iceClientInfo) {
+            console.log('Relaying ICE candidate to peer:', message.targetPeer);
+            const targetRoom = rooms.get(iceClientInfo.roomCode);
+            if (targetRoom) {
+              targetRoom.clients.forEach(client => {
+                const clientInfo = clients.get(client);
+                if (clientInfo && clientInfo.playerId === message.targetPeer) {
+                  client.send(JSON.stringify({
+                    type: 'webrtc_ice_candidate',
+                    candidate: message.candidate,
+                    fromPeer: iceClientInfo.playerId
+                  }));
+                }
+              });
+            }
           }
           break;
           

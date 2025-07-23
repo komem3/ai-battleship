@@ -1,11 +1,11 @@
 # Battleship Game
 
-multiplayer battleship game built with React, Vite, and WebRTC for P2P communication.
+multiplayer battleship game built with React, Vite, and WebSocket for real-time communication.
 
 ## Features
 
 - **Multiplayer Support**: 2-5 players in free-for-all mode
-- **P2P Architecture**: WebRTC for real-time game synchronization
+- **Real-time Architecture**: WebSocket for real-time game synchronization
 - **Dynamic Board Sizing**: Board size changes based on player count
   - 2 players: 5x5
   - 3 players: 7x7
@@ -58,7 +58,7 @@ npm run dev
 ## Technical Architecture
 
 - **Frontend**: React with Vite and Tailwind CSS
-- **P2P Communication**: WebRTC using simple-peer library
+- **Real-time Communication**: WebSocket for multiplayer synchronization
 - **Signaling**: WebSocket server for connection establishment
 - **State Management**: Custom React hooks for game state
 
@@ -69,7 +69,7 @@ The project uses:
 - React 19 with hooks
 - Vite for build tooling
 - Tailwind CSS for styling
-- WebRTC for peer-to-peer communication
+- WebSocket for real-time communication
 - WebSocket for signaling
 
 Run `npm run lint` to check code quality.

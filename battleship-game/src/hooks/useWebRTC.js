@@ -1,243 +1,343 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import SimplePeer from 'simple-peer';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
-const useWebRTC = (playerId, isHost) => {
-  const [peers, setPeers] = useState(new Map());
-  const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef(null);
-  const peersRef = useRef(new Map());
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' }
+];
 
-  const connectToSignalingServer = useCallback((wsUrl = 'ws://localhost:8080') => {
-    wsRef.current = new WebSocket(wsUrl);
+const useWebRTC = () => {
+  const [connectionState, setConnectionState] = useState('disconnected');
+  const [connectedPeers, setConnectedPeers] = useState([]);
+  const [isHost, setIsHost] = useState(false);
+  const [roomCode, setRoomCode] = useState('');
+  
+  // WebRTC関連のrefs
+  const peerConnectionsRef = useRef(new Map()); // peerId -> RTCPeerConnection
+  const dataChannelsRef = useRef(new Map()); // peerId -> RTCDataChannel
+  const onGameMessageRef = useRef(null);
+  
+  // シグナリング用WebSocket（部屋の作成・参加とWebRTC情報交換のみ）
+  const signalingWSRef = useRef(null);
+  const onSignalingMessageRef = useRef(null);
+
+  // シグナリングサーバーへの接続
+  const connectToSignalingServer = useCallback(() => {
+    if (signalingWSRef.current && signalingWSRef.current.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    const ws = new WebSocket('ws://localhost:8080');
     
-    wsRef.current.onopen = () => {
+    ws.onopen = () => {
       console.log('Connected to signaling server');
     };
     
-    wsRef.current.onclose = () => {
-      console.log('Disconnected from signaling server');
-      setIsConnected(false);
-    };
-    
-    wsRef.current.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-    
-    wsRef.current.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      
-      console.log('WebRTC handling signaling message:', message);
-      
-      // Handle WebRTC specific messages
-      switch (message.type) {
-        case 'webrtc_offer':
-          if (message.to === playerId) {
-            handleOffer(message.from, message.data);
-          }
-          break;
-        case 'webrtc_answer':
-          if (message.to === playerId) {
-            handleAnswer(message.from, message.data);
-          }
-          break;
-        case 'webrtc_ice_candidate':
-          if (message.to === playerId) {
-            handleIceCandidate(message.from, message.data);
-          }
-          break;
-        case 'player_joined':
-          if (isHost && message.player && message.player.id !== playerId) {
-            initiateConnection(message.player.id);
-          }
-          break;
-      }
-      
-      // Forward all messages to App component
-      if (onSignalingMessageRef.current) {
-        onSignalingMessageRef.current(message);
-      }
-    };
-  }, [playerId, isHost]);
-
-
-  const createPeer = useCallback((targetPlayerId, initiator = false) => {
-    const peer = new SimplePeer({
-      initiator: initiator,
-      trickle: false
-    });
-
-    peer.on('signal', (data) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: initiator ? 'webrtc_offer' : 'webrtc_answer',
-          from: playerId,
-          to: targetPlayerId,
-          data: data
-        }));
-      }
-    });
-
-    peer.on('connect', () => {
-      console.log(`Connected to peer: ${targetPlayerId}`);
-      console.log(`Total connected peers: ${Array.from(peersRef.current.values()).filter(p => p.connected).length}`);
-      setIsConnected(true);
-    });
-
-    peer.on('data', (data) => {
+    ws.onmessage = (event) => {
       try {
-        if (!data || data.length === 0) {
-          console.warn('Received empty data from peer:', targetPlayerId);
-          return;
+        const message = JSON.parse(event.data);
+        console.log('Received signaling message:', message);
+        
+        if (onSignalingMessageRef.current) {
+          onSignalingMessageRef.current(message);
         }
-        const dataString = data.toString();
-        if (!dataString || dataString.trim() === '') {
-          console.warn('Received empty string from peer:', targetPlayerId);
-          return;
-        }
-        console.log('Raw data received from peer:', targetPlayerId, dataString);
-        const message = JSON.parse(dataString);
-        if (!message || typeof message !== 'object') {
-          console.warn('Parsed message is not a valid object:', message);
-          return;
-        }
-        handlePeerMessage(targetPlayerId, message);
       } catch (error) {
-        console.error('Error parsing peer message from', targetPlayerId, ':', error, 'Data:', data);
+        console.error('Error parsing signaling message:', error);
       }
-    });
+    };
+    
+    ws.onclose = () => {
+      console.log('Disconnected from signaling server');
+      signalingWSRef.current = null;
+    };
+    
+    ws.onerror = (error) => {
+      console.error('Signaling WebSocket error:', error);
+    };
 
-    peer.on('error', (error) => {
-      console.error(`Peer error with ${targetPlayerId}:`, error);
-    });
+    signalingWSRef.current = ws;
+  }, []);
 
-    peer.on('close', () => {
-      console.log(`Peer connection closed: ${targetPlayerId}`);
-      peersRef.current.delete(targetPlayerId);
-      setPeers(new Map(peersRef.current));
-    });
-
-    peersRef.current.set(targetPlayerId, peer);
-    setPeers(new Map(peersRef.current));
-
-    return peer;
-  }, [playerId]);
-
-  const initiateConnection = useCallback((targetPlayerId) => {
-    if (!peersRef.current.has(targetPlayerId)) {
-      createPeer(targetPlayerId, true);
-    }
-  }, [createPeer]);
-
-  const handleOffer = useCallback((fromPlayerId, offer) => {
-    if (!peersRef.current.has(fromPlayerId)) {
-      const peer = createPeer(fromPlayerId, false);
-      peer.signal(offer);
-    }
-  }, [createPeer]);
-
-  const handleAnswer = useCallback((fromPlayerId, answer) => {
-    const peer = peersRef.current.get(fromPlayerId);
-    if (peer) {
-      peer.signal(answer);
+  // シグナリングサーバーにメッセージ送信
+  const sendToSignalingServer = useCallback((message) => {
+    if (signalingWSRef.current && signalingWSRef.current.readyState === WebSocket.OPEN) {
+      signalingWSRef.current.send(JSON.stringify(message));
     }
   }, []);
 
-  const handleIceCandidate = useCallback((fromPlayerId, candidate) => {
-    const peer = peersRef.current.get(fromPlayerId);
-    if (peer) {
-      peer.signal(candidate);
-    }
-  }, []);
-
-  const [onPeerMessage, setOnPeerMessage] = useState(null);
-  const onSignalingMessageRef = useRef(null);
-  
+  // シグナリングメッセージのハンドラー設定
   const setOnSignalingMessage = useCallback((callback) => {
     onSignalingMessageRef.current = callback;
   }, []);
 
-  const handlePeerMessage = useCallback((fromPlayerId, message) => {
-    console.log(`Received message from ${fromPlayerId}:`, message);
-    if (onPeerMessage && message) {
-      onPeerMessage(fromPlayerId, message);
-    }
-  }, [onPeerMessage]);
+  // ゲームメッセージのハンドラー設定
+  const setOnGameMessage = useCallback((callback) => {
+    onGameMessageRef.current = callback;
+  }, []);
 
-  const sendToAllPeers = useCallback((message) => {
-    if (!message || typeof message !== 'object') {
-      console.error('Attempted to send invalid message:', message);
-      return;
+  // 新しいピア接続を作成
+  const createPeerConnection = useCallback((peerId) => {
+    const peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendToSignalingServer({
+          type: 'webrtc_ice_candidate',
+          candidate: event.candidate,
+          targetPeer: peerId,
+          roomCode: roomCode
+        });
+      }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      console.log(`Peer ${peerId} connection state: ${peerConnection.connectionState}`);
+      updateConnectionState();
+    };
+
+    peerConnection.ondatachannel = (event) => {
+      const dataChannel = event.channel;
+      setupDataChannel(dataChannel, peerId);
+    };
+
+    peerConnectionsRef.current.set(peerId, peerConnection);
+    return peerConnection;
+  }, [roomCode, sendToSignalingServer]);
+
+  // データチャネルの設定
+  const setupDataChannel = useCallback((dataChannel, peerId) => {
+    dataChannel.onopen = () => {
+      console.log(`Data channel with ${peerId} opened`);
+      setConnectedPeers(prev => [...prev.filter(p => p !== peerId), peerId]);
+      updateConnectionState();
+    };
+
+    dataChannel.onclose = () => {
+      console.log(`Data channel with ${peerId} closed`);
+      setConnectedPeers(prev => prev.filter(p => p !== peerId));
+      updateConnectionState();
+    };
+
+    dataChannel.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log(`Received game message from ${peerId}:`, message);
+        
+        if (onGameMessageRef.current) {
+          onGameMessageRef.current(message, peerId);
+        }
+      } catch (error) {
+        console.error('Error parsing game message:', error);
+      }
+    };
+
+    dataChannelsRef.current.set(peerId, dataChannel);
+  }, []);
+
+  // 接続状態の更新
+  const updateConnectionState = useCallback(() => {
+    const connections = Array.from(peerConnectionsRef.current.values());
+    const openChannels = Array.from(dataChannelsRef.current.values())
+      .filter(channel => channel.readyState === 'open');
+
+    if (openChannels.length === 0) {
+      setConnectionState('disconnected');
+    } else if (openChannels.length === connections.length) {
+      setConnectionState('connected');
+    } else {
+      setConnectionState('connecting');
     }
-    
-    console.log(`Sending message to ${peersRef.current.size} peers:`, message);
+  }, []);
+
+  // 他のピアにオファーを送信（ホストが新しいピアに対して実行）
+  const sendOfferToPeer = useCallback(async (peerId) => {
+    try {
+      const peerConnection = createPeerConnection(peerId);
+      
+      // データチャネルを作成（ホスト側）
+      const dataChannel = peerConnection.createDataChannel('game', {
+        ordered: true
+      });
+      setupDataChannel(dataChannel, peerId);
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      sendToSignalingServer({
+        type: 'webrtc_offer',
+        offer: offer,
+        targetPeer: peerId,
+        roomCode: roomCode
+      });
+    } catch (error) {
+      console.error('Error sending offer to peer:', error);
+    }
+  }, [createPeerConnection, setupDataChannel, sendToSignalingServer, roomCode]);
+
+  // オファーを受信して応答（新しく参加したピアが実行）
+  const handleOffer = useCallback(async (offer, fromPeer) => {
+    try {
+      const peerConnection = createPeerConnection(fromPeer);
+      await peerConnection.setRemoteDescription(offer);
+
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      sendToSignalingServer({
+        type: 'webrtc_answer',
+        answer: answer,
+        targetPeer: fromPeer,
+        roomCode: roomCode
+      });
+    } catch (error) {
+      console.error('Error handling offer:', error);
+    }
+  }, [createPeerConnection, sendToSignalingServer, roomCode]);
+
+  // アンサーを受信（ホストが実行）
+  const handleAnswer = useCallback(async (answer, fromPeer) => {
+    try {
+      const peerConnection = peerConnectionsRef.current.get(fromPeer);
+      if (peerConnection) {
+        await peerConnection.setRemoteDescription(answer);
+      }
+    } catch (error) {
+      console.error('Error handling answer:', error);
+    }
+  }, []);
+
+  // ICE候補を処理
+  const handleIceCandidate = useCallback(async (candidate, fromPeer) => {
+    try {
+      const peerConnection = peerConnectionsRef.current.get(fromPeer);
+      if (peerConnection) {
+        await peerConnection.addIceCandidate(candidate);
+      }
+    } catch (error) {
+      console.error('Error handling ICE candidate:', error);
+    }
+  }, []);
+
+  // 全てのピアにゲームメッセージを送信
+  const broadcastGameMessage = useCallback((message) => {
+    const messageStr = JSON.stringify(message);
     let sentCount = 0;
-    const messageString = JSON.stringify(message);
-    
-    peersRef.current.forEach((peer, peerId) => {
-      if (peer.connected) {
+
+    dataChannelsRef.current.forEach((dataChannel, peerId) => {
+      if (dataChannel.readyState === 'open') {
         try {
-          console.log(`Sending to peer ${peerId}:`, message);
-          peer.send(messageString);
+          dataChannel.send(messageStr);
           sentCount++;
         } catch (error) {
-          console.error(`Failed to send message to peer ${peerId}:`, error);
+          console.error(`Error sending message to peer ${peerId}:`, error);
         }
-      } else {
-        console.log(`Peer ${peerId} is not connected, skipping`);
       }
     });
-    console.log(`Message sent to ${sentCount} peers out of ${peersRef.current.size}`);
+
+    console.log(`Broadcast message sent to ${sentCount} peers:`, message);
+    return sentCount;
   }, []);
 
-  const sendToPeer = useCallback((targetPlayerId, message) => {
-    const peer = peersRef.current.get(targetPlayerId);
-    if (peer && peer.connected) {
-      peer.send(JSON.stringify(message));
+  // 特定のピアにゲームメッセージを送信
+  const sendGameMessageToPeer = useCallback((message, peerId) => {
+    const dataChannel = dataChannelsRef.current.get(peerId);
+    if (dataChannel && dataChannel.readyState === 'open') {
+      try {
+        dataChannel.send(JSON.stringify(message));
+        return true;
+      } catch (error) {
+        console.error(`Error sending message to peer ${peerId}:`, error);
+        return false;
+      }
     }
+    return false;
   }, []);
 
-  const sendToSignalingServer = useCallback((message) => {
-    console.log('Attempting to send message:', message);
-    console.log('WebSocket state:', wsRef.current?.readyState);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('Sending message to signaling server:', message);
-      wsRef.current.send(JSON.stringify(message));
-    } else {
-      console.error('WebSocket not ready, state:', wsRef.current?.readyState);
+  // 新しいピアが参加した時の処理
+  const handlePeerJoined = useCallback((peerId) => {
+    if (isHost) {
+      // ホストは新しいピアにオファーを送信
+      sendOfferToPeer(peerId);
     }
-  }, []);
+  }, [isHost, sendOfferToPeer]);
 
-  const disconnect = useCallback(() => {
-    peersRef.current.forEach((peer) => {
-      peer.destroy();
+  // ピアが退出した時の処理
+  const handlePeerLeft = useCallback((peerId) => {
+    const peerConnection = peerConnectionsRef.current.get(peerId);
+    const dataChannel = dataChannelsRef.current.get(peerId);
+
+    if (peerConnection) {
+      peerConnection.close();
+      peerConnectionsRef.current.delete(peerId);
+    }
+
+    if (dataChannel) {
+      dataChannel.close();
+      dataChannelsRef.current.delete(peerId);
+    }
+
+    setConnectedPeers(prev => prev.filter(p => p !== peerId));
+    updateConnectionState();
+  }, [updateConnectionState]);
+
+  // WebRTCクリーンアップ
+  const cleanup = useCallback(() => {
+    // 全てのピア接続を閉じる
+    peerConnectionsRef.current.forEach((peerConnection, peerId) => {
+      peerConnection.close();
     });
-    peersRef.current.clear();
-    setPeers(new Map());
-    
-    if (wsRef.current) {
-      wsRef.current.close();
+    peerConnectionsRef.current.clear();
+
+    // 全てのデータチャネルを閉じる
+    dataChannelsRef.current.forEach((dataChannel, peerId) => {
+      dataChannel.close();
+    });
+    dataChannelsRef.current.clear();
+
+    // シグナリング接続を閉じる
+    if (signalingWSRef.current) {
+      signalingWSRef.current.close();
+      signalingWSRef.current = null;
     }
-    
-    setIsConnected(false);
+
+    setConnectedPeers([]);
+    setConnectionState('disconnected');
+    setIsHost(false);
+    setRoomCode('');
   }, []);
 
+  // コンポーネントアンマウント時のクリーンアップ
   useEffect(() => {
     return () => {
-      disconnect();
+      cleanup();
     };
-  }, [disconnect]);
+  }, [cleanup]);
 
   return {
-    peers,
-    isConnected,
+    // 接続状態
+    connectionState,
+    connectedPeers,
+    isHost,
+    roomCode,
+    setIsHost,
+    setRoomCode,
+
+    // シグナリング機能
     connectToSignalingServer,
-    sendToAllPeers,
-    sendToPeer,
     sendToSignalingServer,
-    disconnect,
-    setOnPeerMessage,
     setOnSignalingMessage,
-    wsRef
+
+    // WebRTC機能
+    setOnGameMessage,
+    broadcastGameMessage,
+    sendGameMessageToPeer,
+    handleOffer,
+    handleAnswer,
+    handleIceCandidate,
+    handlePeerJoined,
+    handlePeerLeft,
+
+    // その他
+    cleanup
   };
 };
 

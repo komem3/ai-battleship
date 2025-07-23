@@ -11,12 +11,13 @@ import { generateRandomShips, checkAllShipsSunk, getRemainingShipsCount } from '
 function App() {
   const gameState = useGameState();
   const [myPlayerId] = useState(() => Math.random().toString(36).substr(2, 9));
-  const webRTC = useWebRTC(myPlayerId, gameState.isHost);
+  const webRTC = useWebRTC();
 
   const handleCreateRoom = useCallback((playerName, maxTurns) => {
     console.log('Creating room with player:', playerName, 'maxTurns:', maxTurns, 'playerId:', myPlayerId);
     gameState.setIsHost(true);
     gameState.setMaxTurns(maxTurns);
+    webRTC.setIsHost(true);
     
     webRTC.connectToSignalingServer();
     
@@ -41,6 +42,8 @@ function App() {
     console.log('Joining room with player:', playerName, 'roomCode:', roomCode, 'playerId:', myPlayerId);
     gameState.setIsHost(false);
     gameState.setRoomCode(roomCode);
+    webRTC.setIsHost(false);
+    webRTC.setRoomCode(roomCode);
     
     webRTC.connectToSignalingServer();
     
@@ -61,7 +64,19 @@ function App() {
     }, 1000);
   }, [myPlayerId, gameState, webRTC]);
 
-  const handleStartGame = useCallback(() => {
+  const handleStartGame = useCallback(async () => {
+    console.log('Starting game...');
+    
+    // WebRTC接続を確立
+    gameState.players.forEach(player => {
+      if (player.id !== myPlayerId) {
+        webRTC.handlePeerJoined(player.id);
+      }
+    });
+
+    // WebRTC接続が確立されるまで少し待機
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
     const boardSize = gameState.getBoardSize(gameState.players.length);
     const newBoard = gameState.initializeBoard(boardSize);
     
@@ -82,7 +97,7 @@ function App() {
     gameState.setCurrentPlayer(gameState.players[0]);
     gameState.setGameState(GAME_STATES.PLAYING);
     
-    // WebSocketを通じてゲーム開始を通知（メインの同期手段）
+    // WebRTCでゲーム開始を通知
     const gameStartMessage = {
       type: 'game_started',
       board: boardWithShips,
@@ -91,13 +106,9 @@ function App() {
       maxTurns: gameState.maxTurns
     };
     
-    console.log('Sending game start message via WebSocket');
-    webRTC.sendToSignalingServer({
-      type: 'game_started',
-      roomCode: gameState.roomCode,
-      ...gameStartMessage
-    });
-  }, [gameState, webRTC]);
+    console.log('Broadcasting game start message via WebRTC');
+    webRTC.broadcastGameMessage(gameStartMessage);
+  }, [gameState, webRTC, myPlayerId]);
 
   const checkGameEnd = useCallback(() => {
     console.log('=== checkGameEnd called ===');
@@ -215,12 +226,9 @@ function App() {
       turn: gameState.turnCount
     };
     
-    // WebSocketを通じて送信（メインの同期手段）
-    webRTC.sendToSignalingServer({
-      type: 'attack_sync',
-      roomCode: gameState.roomCode,
-      ...attackMessage
-    });
+    // WebRTCを通じて送信
+    console.log('Broadcasting attack via WebRTC:', attackMessage);
+    webRTC.broadcastGameMessage(attackMessage);
     
     checkGameEnd();
   }, [gameState, myPlayerId, webRTC, checkGameEnd]);
@@ -246,12 +254,9 @@ function App() {
       turn: gameState.turnCount
     };
     
-    // WebSocketを通じて送信
-    webRTC.sendToSignalingServer({
-      type: 'move_sync',
-      roomCode: gameState.roomCode,
-      ...moveMessage
-    });
+    // WebRTCを通じて送信
+    console.log('Broadcasting move via WebRTC:', moveMessage);
+    webRTC.broadcastGameMessage(moveMessage);
     
   }, [gameState, myPlayerId, webRTC]);
 
@@ -292,14 +297,10 @@ function App() {
       fromPlayer: myPlayerId
     };
     
-    console.log('Sending turn message:', turnMessage);
+    console.log('Broadcasting turn message via WebRTC:', turnMessage);
     
-    // WebSocketを通じて送信
-    webRTC.sendToSignalingServer({
-      type: 'turn_sync',
-      roomCode: gameState.roomCode,
-      ...turnMessage
-    });
+    // WebRTCを通じて送信
+    webRTC.broadcastGameMessage(turnMessage);
   }, [gameState, myPlayerId, webRTC]);
 
   useEffect(() => {
@@ -311,7 +312,7 @@ function App() {
     // 自動ターン変更のコールバック関数を設定
     gameState.setAutoTurnCallback(handleNextTurn);
     
-    console.log('Setting up signaling message handler');
+    console.log('Setting up WebRTC message handlers');
     
     const handleSignalingMessage = (message) => {
       console.log('Received signaling message:', message);
@@ -319,7 +320,7 @@ function App() {
         case 'room_created':
           console.log('Room created with code:', message.roomCode);
           gameState.setRoomCode(message.roomCode);
-          // Set all players from the room
+          webRTC.setRoomCode(message.roomCode);
           if (message.players) {
             console.log('Setting players from room_created:', message.players);
             gameState.setPlayers(message.players);
@@ -329,7 +330,7 @@ function App() {
           console.log('Room joined with code:', message.roomCode);
           console.log('Players from room_joined:', message.players);
           gameState.setRoomCode(message.roomCode);
-          // Set all players from the room
+          webRTC.setRoomCode(message.roomCode);
           if (message.players) {
             gameState.setPlayers(message.players);
           }
@@ -342,65 +343,64 @@ function App() {
           } else {
             gameState.addPlayer(message.player);
           }
+          // WebRTC接続を確立
+          if (webRTC.isHost && message.player.id !== myPlayerId) {
+            webRTC.handlePeerJoined(message.player.id);
+          }
           break;
+        case 'webrtc_offer':
+          console.log('Received WebRTC offer from:', message.fromPeer);
+          webRTC.handleOffer(message.offer, message.fromPeer);
+          break;
+        case 'webrtc_answer':
+          console.log('Received WebRTC answer from:', message.fromPeer);
+          webRTC.handleAnswer(message.answer, message.fromPeer);
+          break;
+        case 'webrtc_ice_candidate':
+          console.log('Received ICE candidate from:', message.fromPeer);
+          webRTC.handleIceCandidate(message.candidate, message.fromPeer);
+          break;
+        case 'player_left':
+          console.log('Player left:', message.playerId);
+          gameState.removePlayer(message.playerId);
+          webRTC.handlePeerLeft(message.playerId);
+          break;
+        case 'error':
+          console.error('Signaling error:', message.message);
+          alert(message.message);
+          break;
+      }
+    };
+
+    const handleGameMessage = (message, fromPeer) => {
+      console.log('Received game message from peer:', fromPeer, message);
+      switch (message.type) {
         case 'game_started':
-          console.log('Received game_started message from signaling server:', message);
-          console.log('Setting game state from signaling server:', {
-            board: message.board ? `${message.board.length}x${message.board[0]?.length}` : 'null',
-            ships: message.ships ? message.ships.length : 0,
-            currentPlayer: message.currentPlayer?.name,
-            maxTurns: message.maxTurns,
-            isHost: gameState.isHost
-          });
-          
-          // ホストも参加者も同じ状態を設定
+          console.log('Received game_started via WebRTC:', message);
           if (message.board && message.ships && message.currentPlayer) {
-            // 状態を同期的に設定
             gameState.setBoardWithShips(message.board, message.ships);
             gameState.setCurrentPlayer(message.currentPlayer);
             gameState.setMaxTurns(message.maxTurns);
             gameState.setGameState(GAME_STATES.PLAYING);
-            console.log('Game state synchronized - ships:', message.ships.length, 'board cells with ships:', message.board.flat().filter(cell => cell.ships && cell.ships.length > 0).length);
-          } else {
-            console.error('Invalid game_started message - missing required fields');
+            console.log('Game state synchronized via WebRTC');
           }
           break;
         case 'attack_sync':
-          console.log('Received attack_sync message from signaling server:', message);
+          console.log('Received attack_sync via WebRTC:', message);
           if (message.attacker !== myPlayerId) {
-            console.log('Processing remote attack:', message.coordinates, 'by', message.attacker);
-            const cellBefore = gameState.board[message.coordinates.x][message.coordinates.y];
-            console.log('Cell before attack:', cellBefore);
             gameState.attack(message.coordinates.x, message.coordinates.y, message.attacker, message.attackingShipId, false);
-            const cellAfter = gameState.board[message.coordinates.x][message.coordinates.y];
-            console.log('Cell after attack:', cellAfter);
             checkGameEnd();
           }
           break;
         case 'move_sync':
-          console.log('Received move_sync message from signaling server:', message);
+          console.log('Received move_sync via WebRTC:', message);
           if (message.player !== myPlayerId) {
-            console.log('Processing remote move:', message.shipId, 'to', message.coordinates);
             gameState.moveShip(message.shipId, message.coordinates, false);
           }
           break;
         case 'turn_sync':
-          console.log('Received turn_sync message from signaling server:', message);
-          console.log('Message details:', {
-            currentPlayer: message.currentPlayer,
-            turnCount: message.turnCount, 
-            fromPlayer: message.fromPlayer,
-            myPlayerId: myPlayerId
-          });
-          
+          console.log('Received turn_sync via WebRTC:', message);
           if (message.fromPlayer !== myPlayerId) {
-            console.log('Syncing turn to player:', message.currentPlayer?.name, 'turn:', message.turnCount);
-            console.log('Previous game state:', {
-              currentPlayer: gameState.currentPlayer?.name,
-              turnCount: gameState.turnCount
-            });
-            
-            // ゲーム状態を同期的に更新（flushSyncを利用して即座に同期）
             flushSync(() => {
               if (message.currentPlayer) {
                 gameState.setCurrentPlayer(message.currentPlayer);
@@ -413,33 +413,14 @@ function App() {
               gameState.setActionTaken(false);
               gameState.setSelectedShip(null);
             });
-            
-            console.log('After sync game state:', {
-              currentPlayer: message.currentPlayer?.name,
-              turnCount: message.turnCount
-            });
-          } else {
-            console.log('Skipping turn sync - message from self');
           }
-          break;
-        case 'player_left':
-          console.log('Player left:', message.playerId);
-          gameState.removePlayer(message.playerId);
-          break;
-        case 'error':
-          console.error('Signaling error:', message.message);
-          alert(message.message);
           break;
       }
     };
 
-    // Set up signaling message handler
+    // Set up message handlers
     webRTC.setOnSignalingMessage(handleSignalingMessage);
-
-    // WebRTCピアメッセージ処理は無効化（WebSocketのみ使用）
-    webRTC.setOnPeerMessage(() => {
-      // WebRTCピアメッセージは無視（WebSocketのみ使用）
-    });
+    webRTC.setOnGameMessage(handleGameMessage);
 
   }, [webRTC, handleNextTurn, gameState, myPlayerId, checkGameEnd]);
 
@@ -454,6 +435,8 @@ function App() {
             isHost={gameState.isHost}
             roomCode={gameState.roomCode}
             players={gameState.players}
+            webRTCConnectionState={webRTC.connectionState}
+            connectedPeers={webRTC.connectedPeers}
           />
         );
       

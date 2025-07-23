@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const Lobby = ({ onCreateRoom, onJoinRoom, onStartGame, isHost, roomCode, players }) => {
+const Lobby = ({ onCreateRoom, onJoinRoom, onStartGame, isHost, roomCode, players, webRTCConnectionState, connectedPeers }) => {
   const [joinRoomCode, setJoinRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [maxTurns, setMaxTurns] = useState(50);
@@ -104,15 +104,43 @@ const Lobby = ({ onCreateRoom, onJoinRoom, onStartGame, isHost, roomCode, player
             <div className="border-t pt-4">
               <h3 className="font-medium mb-2">参加プレイヤー ({players.length}/5)</h3>
               <p className="text-sm text-gray-600 mb-2">2人以上でゲーム開始可能</p>
+              
+              {/* WebRTC接続状態の表示 */}
+              {players.length > 1 && (
+                <div className="mb-3 p-2 bg-gray-50 rounded">
+                  <div className="text-xs text-gray-600 mb-1">WebRTC接続状態</div>
+                  <div className="flex items-center">
+                    <div className={`w-2 h-2 rounded-full mr-2 ${
+                      webRTCConnectionState === 'connected' ? 'bg-green-500' :
+                      webRTCConnectionState === 'connecting' ? 'bg-yellow-500' :
+                      'bg-red-500'
+                    }`}></div>
+                    <span className="text-xs">
+                      {webRTCConnectionState === 'connected' ? `接続完了 (${connectedPeers?.length || 0}/${players.length - 1})` :
+                       webRTCConnectionState === 'connecting' ? '接続中...' :
+                       '未接続'}
+                    </span>
+                  </div>
+                </div>
+              )}
+              
               <div className="space-y-2">
                 {players.map((player) => (
                   <div key={player.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                     <span>{player.name}</span>
-                    {player.isHost && (
-                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                        ホスト
-                      </span>
-                    )}
+                    <div className="flex items-center space-x-2">
+                      {/* P2P接続状態の表示 */}
+                      {players.length > 1 && player.id !== players.find(p => p.isHost)?.id && (
+                        <div className={`w-1.5 h-1.5 rounded-full ${
+                          connectedPeers?.includes(player.id) ? 'bg-green-500' : 'bg-gray-400'
+                        }`} title={connectedPeers?.includes(player.id) ? 'P2P接続済み' : 'P2P未接続'}></div>
+                      )}
+                      {player.isHost && (
+                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                          ホスト
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
